@@ -26,7 +26,14 @@ impl EventHandler for Handler {
         let http = ctx.http.clone();
         for g in ready.guilds {
             let channels = g.id.channels(http.clone()).await.unwrap();
-            let live_racers = channels.get(&ChannelId(1113033477345001492)).unwrap();
+            let live_racers = channels
+                .get(&ChannelId(
+                    std::env::var("DISCORD_CHANNEL_ID")
+                        .unwrap()
+                        .parse::<u64>()
+                        .unwrap(),
+                ))
+                .unwrap();
 
             tokio::spawn(update_live_racers(ctx.clone(), live_racers.clone()));
         }
