@@ -109,10 +109,14 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
                         server_color as u8,
                     );
 
+                    let server_icon =
+                        env::var(format!("{}_ICON", server.m_scoring_info.m_server_name))
+                            .unwrap_or(server.m_scoring_info.m_server_name.clone());
+
                     embeds.push(
                         CreateEmbed::default()
                             .colour(Colour::from_rgb(red, green, blue))
-                            .title(format!(":{}:", server.m_scoring_info.m_server_name.clone()))
+                            .title(server_icon)
                             .field("Track", server.m_scoring_info.m_track_name.clone(), false)
                             .field("Drivers", format_drivers(&players), false)
                             // .field("AI", format_drivers(&ai), false)
@@ -127,7 +131,7 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
                                 true,
                             )
                             .field(
-                                "Elapsed / end time",
+                                "Elapsed / End time",
                                 format!(
                                     "{} / {}",
                                     format_minutes_time(server.m_scoring_info.m_current_et),
@@ -164,12 +168,12 @@ fn format_drivers(vec: &Vec<&Vehicle>) -> String {
     let mut vec = vec.clone();
     vec.sort_by(|a, b| a.m_place.cmp(&b.m_place));
 
-    let fastest_lap = vec
-        .iter()
-        .filter(|v| v.m_best_lap_time > 0.0)
-        .min_by(|a, b| a.m_best_lap_time.partial_cmp(&b.m_best_lap_time).unwrap())
-        .map(|v| v.m_best_lap_time)
-        .unwrap_or(0.0);
+    // let fastest_lap = vec
+    //     .iter()
+    //     .filter(|v| v.m_best_lap_time > 0.0)
+    //     .min_by(|a, b| a.m_best_lap_time.partial_cmp(&b.m_best_lap_time).unwrap())
+    //     .map(|v| v.m_best_lap_time)
+    //     .unwrap_or(0.0);
 
     vec.iter()
         .map(|v| {
@@ -196,16 +200,22 @@ fn format_minutes_time(time: f32) -> String {
 
     format!("{}:{:02}", minutes, seconds)
 }
-fn format_laptime(laptime: f32) -> String {
-    if laptime <= 0.0 {
-        return "None".to_owned();
+
+fn format_laptime(seconds: f32) -> String {
+    if seconds <= 0.0 {
+        return "--:--.---".to_owned();
     }
 
-    let minutes = (laptime / 60.0).floor();
-    let seconds = (laptime - minutes * 60.0).floor();
-    let millis = (laptime - minutes * 60.0 - seconds) * 1000.0;
+    let minutes = (seconds / 60.0) as u32;
+    let remaining_seconds = seconds % 60.0;
+    let formatted_seconds = format!("{:06.3}", remaining_seconds);
 
-    format!("{}:{:02}.{:03}", minutes, seconds, millis)
+    format!(
+        "{}:{:02}.{}",
+        minutes,
+        remaining_seconds as u32,
+        formatted_seconds.split('.').next().unwrap()
+    )
 }
 
 #[tokio::main]
@@ -213,8 +223,9 @@ async fn main() {
     let handle = flexi_logger::Logger::try_with_str("warn,discord_bot=info")
         .unwrap()
         .format(flexi_logger::colored_default_format)
-        .log_to_file(FileSpec::default().basename("discord-bot"))
-        .write_mode(flexi_logger::WriteMode::Direct)
+        .log_to_stdout()
+        // .log_to_file(FileSpec::default().basename("discord-bot"))
+        // .write_mode(flexi_logger::WriteMode::Direct)
         .start()
         .unwrap();
     log_panics::init();

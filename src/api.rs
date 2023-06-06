@@ -34,6 +34,7 @@ pub struct ScoringInfo {
     pub m_max_laps: i32,
     pub m_lap_dist: f32,
     pub m_num_vehicles: i32,
+    // 3 = race
     pub m_game_phase: i32,
     pub m_yellow_flag_state: i32,
     pub m_sector_flag: Vec<i32>,
