@@ -115,7 +115,7 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
                             .title(format!(":{}:", server.m_scoring_info.m_server_name.clone()))
                             .field("Track", server.m_scoring_info.m_track_name.clone(), false)
                             .field("Drivers", format_drivers(&players), false)
-                            .field("AI", format_drivers(&ai), false)
+                            // .field("AI", format_drivers(&ai), false)
                             .field(
                                 "Track temperature",
                                 format_temp(server.m_scoring_info.m_track_temp),
