@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -89,4 +90,20 @@ pub struct Vehicle {
     pub m_fuel: f32,
     pub m_wear: Vec<f32>,
     pub speed: f32,
+}
+
+pub async fn get_live_data(server_name: Option<String>) -> anyhow::Result<LiveData> {
+    let rf2la_url = std::env::var("RF2LA_URL").unwrap();
+
+    let url = match server_name {
+        Some(server_name) => format!("{}/live/get_data?name={}", rf2la_url, server_name),
+        None => format!("{}/live/get_data", rf2la_url),
+    };
+
+    reqwest::get(url)
+        .await
+        .context("Could not get live data")?
+        .json()
+        .await
+        .context("Failed to deserialize live data")
 }

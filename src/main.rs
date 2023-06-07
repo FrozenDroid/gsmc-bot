@@ -1,9 +1,8 @@
 use std::env;
 
-use api::LiveData;
+use anyhow::Context as _;
 
 use api::Vehicle;
-use flexi_logger::FileSpec;
 use serenity::async_trait;
 
 use serenity::builder::CreateEmbed;
@@ -12,8 +11,12 @@ use serenity::model::prelude::GuildChannel;
 use serenity::prelude::*;
 use serenity::utils::Colour;
 use serenity::Client;
+use tokio::time::sleep;
+
+use crate::utils::format_channel;
 
 mod api;
+mod utils;
 
 struct Handler;
 
@@ -22,9 +25,13 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         log::info!("{} is connected!", ready.user.name);
 
-        // ready.ctx.set_activity(Activity::playing("with fire")).await;
         let http = ctx.http.clone();
         for g in ready.guilds {
+            log::info!(
+                "Connected to guild \"{}\" ({})",
+                g.id.name(&ctx).unwrap_or("unknown".to_string()),
+                g.id
+            );
             let channels = g.id.channels(http.clone()).await.unwrap();
             let live_racers = channels
                 .get(&ChannelId(
@@ -41,12 +48,7 @@ impl EventHandler for Handler {
 }
 
 async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
-    chan.delete_messages(
-        ctx.http.clone(),
-        chan.messages(ctx.http.clone(), |b| b).await.unwrap(),
-    )
-    .await
-    .unwrap();
+    clean_channel(&chan, &ctx).await;
 
     let mut msg = chan
         .send_message(ctx.http.clone(), |m| {
@@ -57,85 +59,103 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
             m
         })
         .await
+        .with_context(|| {
+            format!(
+                "Error sending message in channel {}",
+                utils::format_channel(&chan)
+            )
+        })
         .unwrap();
 
-    let rf2la_url = std::env::var("RF2LA_URL").unwrap();
-
-    let mut last_data = vec![];
-
-    // let fastest_lap = None;
+    let mut last_servers_data = vec![];
 
     loop {
-        let live_data: LiveData = reqwest::get(format!("{}/live/get_data", rf2la_url,))
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
+        let general_data = match api::get_live_data(None).await {
+            Ok(live_data) => live_data,
+            Err(e) => {
+                log::error!("Error getting live data: {}", e);
+                continue;
+            }
+        };
 
-        let mut servers = vec![];
+        let mut servers_data = vec![];
 
-        for server in live_data.server_list {
-            let server_live_data: LiveData =
-                reqwest::get(format!("{}/live/get_data?name={}", rf2la_url, server.name))
-                    .await
-                    .unwrap()
-                    .json()
-                    .await
-                    .unwrap();
-            servers.push(server_live_data);
+        for server in general_data.server_list {
+            match api::get_live_data(Some(server.name)).await {
+                Ok(live_data) => {
+                    servers_data.push(live_data);
+                }
+                Err(e) => {
+                    log::error!("Error getting live data: {}", e);
+                    continue;
+                }
+            }
         }
 
-        if servers != last_data {
-            log::info!("Updating live racers: {:?}", servers);
+        if servers_data != last_servers_data {
+            log::info!(
+                "Updating live racers in channel \"{}\" ({})...",
+                chan.name,
+                chan.id
+            );
+            log::trace!("with data: {:#?}", servers_data);
 
             msg.edit(ctx.http.clone(), |m| {
                 m.content("");
-                let mut embeds = vec![];
-                for server in servers.iter() {
-                    let (players, ai): (Vec<_>, Vec<_>) =
-                        server.m_vehicles.iter().partition(|v| v.m_control == 2);
 
-                    let server_color = u32::from_str_radix(
+                let mut embeds = vec![];
+                for server in servers_data.iter() {
+                    let players: Vec<_> = server
+                        .m_vehicles
+                        .iter()
+                        .filter(|v| v.m_control == 2)
+                        .collect();
+
+                    let server_colour = match u32::from_str_radix(
                         &std::env::var(format!("{}_COLOUR", server.m_scoring_info.m_server_name))
                             .unwrap_or("000000".to_string()),
                         16,
-                    )
-                    .unwrap();
-
-                    let (red, green, blue) = (
-                        (server_color >> 16) as u8,
-                        (server_color >> 8) as u8,
-                        server_color as u8,
-                    );
+                    ) {
+                        Ok(c) => {
+                            let (red, green, blue) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
+                            Colour::from_rgb(red, green, blue)
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Invalid colour set for server {}: {}",
+                                server.m_scoring_info.m_server_name,
+                                e
+                            );
+                            Colour::default()
+                        }
+                    };
 
                     let server_icon =
-                        env::var(format!("{}_ICON", server.m_scoring_info.m_server_name))
+                        env::var(format!("{}_ICON", &server.m_scoring_info.m_server_name))
                             .unwrap_or(server.m_scoring_info.m_server_name.clone());
 
                     embeds.push(
                         CreateEmbed::default()
-                            .colour(Colour::from_rgb(red, green, blue))
+                            .colour(server_colour)
                             .title(server_icon)
                             .field("Track", server.m_scoring_info.m_track_name.clone(), false)
                             .field("Drivers", format_drivers(&players), false)
-                            // .field("AI", format_drivers(&ai), false)
                             .field(
                                 "Track temperature",
-                                format_temp(server.m_scoring_info.m_track_temp),
+                                utils::format_temp(server.m_scoring_info.m_track_temp),
                                 true,
                             )
                             .field(
                                 "Ambient",
-                                format_temp(server.m_scoring_info.m_ambient_temp),
+                                utils::format_temp(server.m_scoring_info.m_ambient_temp),
                                 true,
                             )
                             .field(
                                 "Elapsed / End time",
                                 format!(
                                     "{} / {}",
-                                    format_minutes_time(server.m_scoring_info.m_current_et),
-                                    format_minutes_time(server.m_scoring_info.m_end_et)
+                                    utils::format_minutes_time(server.m_scoring_info.m_current_et),
+                                    utils::format_minutes_time(server.m_scoring_info.m_end_et)
                                 ),
                                 false,
                             )
@@ -150,14 +170,35 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
             .unwrap();
         }
 
-        last_data = servers.clone();
+        last_servers_data = servers_data.clone();
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }
 
-fn format_temp(temp: f32) -> String {
-    format!("{:.2}°C / {:.0}°F", temp, temp * 1.8 + 32.0)
+async fn clean_channel(chan: &GuildChannel, ctx: &Context) {
+    match chan
+        .delete_messages(
+            ctx.http.clone(),
+            chan.messages(ctx.http.clone(), |b| b).await.unwrap(),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(serenity::Error::Model(ModelError::BulkDeleteAmount)) => {
+            log::warn!(
+                "Could not delete messages in channel {}, probably because there were none. Continuing...",
+                format_channel(chan)
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Error deleting messages in channel {}: {}",
+                format_channel(chan),
+                e
+            );
+        }
+    }
 }
 
 fn format_drivers(vec: &Vec<&Vehicle>) -> String {
@@ -168,54 +209,18 @@ fn format_drivers(vec: &Vec<&Vehicle>) -> String {
     let mut vec = vec.clone();
     vec.sort_by(|a, b| a.m_place.cmp(&b.m_place));
 
-    // let fastest_lap = vec
-    //     .iter()
-    //     .filter(|v| v.m_best_lap_time > 0.0)
-    //     .min_by(|a, b| a.m_best_lap_time.partial_cmp(&b.m_best_lap_time).unwrap())
-    //     .map(|v| v.m_best_lap_time)
-    //     .unwrap_or(0.0);
-
     vec.iter()
         .map(|v| {
             format!(
                 "* {}\n  * Laps: {}\n  * Last Lap: {}\n  * Fastest Lap: {}",
                 v.m_driver_name.clone(),
                 v.m_total_laps,
-                format_laptime(v.m_last_lap_time),
-                format_laptime(v.m_best_lap_time)
+                utils::format_laptime(v.m_last_lap_time),
+                utils::format_laptime(v.m_best_lap_time)
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-// time in minutes f32 (595.4 minutes) to mm:ss
-fn format_minutes_time(time: f32) -> String {
-    if time <= 0.0 {
-        return "--:--".to_owned();
-    }
-
-    let minutes = (time / 60.0).floor();
-    let seconds = (time - minutes * 60.0).floor();
-
-    format!("{}:{:02}", minutes, seconds)
-}
-
-fn format_laptime(seconds: f32) -> String {
-    if seconds <= 0.0 {
-        return "--:--.---".to_owned();
-    }
-
-    let minutes = (seconds / 60.0) as u32;
-    let remaining_seconds = seconds % 60.0;
-    let formatted_seconds = format!("{:06.3}", remaining_seconds);
-
-    format!(
-        "{}:{:02}.{}",
-        minutes,
-        remaining_seconds as u32,
-        formatted_seconds.split('.').next().unwrap()
-    )
 }
 
 #[tokio::main]
@@ -224,8 +229,6 @@ async fn main() {
         .unwrap()
         .format(flexi_logger::colored_default_format)
         .log_to_stdout()
-        // .log_to_file(FileSpec::default().basename("discord-bot"))
-        // .write_mode(flexi_logger::WriteMode::Direct)
         .start()
         .unwrap();
     log_panics::init();
