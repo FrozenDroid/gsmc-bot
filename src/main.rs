@@ -93,81 +93,94 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
         }
 
         if servers_data != last_servers_data {
-            log::info!(
+            log::debug!(
                 "Updating live racers in channel \"{}\" ({})...",
                 chan.name,
                 chan.id
             );
             log::trace!("with data: {:#?}", servers_data);
 
-            msg.edit(ctx.http.clone(), |m| {
-                m.content("");
+            if let Err(e) = msg
+                .edit(ctx.http.clone(), |m| {
+                    m.content("");
 
-                let mut embeds = vec![];
-                for server in servers_data.iter() {
-                    let players: Vec<_> = server
-                        .m_vehicles
-                        .iter()
-                        .filter(|v| v.m_control == 2)
-                        .collect();
+                    let mut embeds = vec![];
+                    for server in servers_data.iter() {
+                        let players: Vec<_> = server
+                            .m_vehicles
+                            .iter()
+                            .filter(|v| v.m_control == 2)
+                            .collect();
 
-                    let server_colour = match u32::from_str_radix(
-                        &std::env::var(format!("{}_COLOUR", server.m_scoring_info.m_server_name))
+                        let server_colour = match u32::from_str_radix(
+                            &std::env::var(format!(
+                                "{}_COLOUR",
+                                server.m_scoring_info.m_server_name
+                            ))
                             .unwrap_or("000000".to_string()),
-                        16,
-                    ) {
-                        Ok(c) => {
-                            let (red, green, blue) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
-                            Colour::from_rgb(red, green, blue)
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "Invalid colour set for server {}: {}",
-                                server.m_scoring_info.m_server_name,
-                                e
-                            );
-                            Colour::default()
-                        }
-                    };
+                            16,
+                        ) {
+                            Ok(c) => {
+                                let (red, green, blue) = ((c >> 16) as u8, (c >> 8) as u8, c as u8);
+                                Colour::from_rgb(red, green, blue)
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Invalid colour set for server {}: {}",
+                                    server.m_scoring_info.m_server_name,
+                                    e
+                                );
+                                Colour::default()
+                            }
+                        };
 
-                    let server_icon =
-                        env::var(format!("{}_ICON", &server.m_scoring_info.m_server_name))
-                            .unwrap_or(server.m_scoring_info.m_server_name.clone());
+                        let server_icon =
+                            env::var(format!("{}_ICON", &server.m_scoring_info.m_server_name))
+                                .unwrap_or(server.m_scoring_info.m_server_name.clone());
 
-                    embeds.push(
-                        CreateEmbed::default()
-                            .colour(server_colour)
-                            .title(server_icon)
-                            .field("Track", server.m_scoring_info.m_track_name.clone(), false)
-                            .field("Drivers", format_drivers(&players), false)
-                            .field(
-                                "Track temperature",
-                                utils::format_temp(server.m_scoring_info.m_track_temp),
-                                true,
-                            )
-                            .field(
-                                "Ambient",
-                                utils::format_temp(server.m_scoring_info.m_ambient_temp),
-                                true,
-                            )
-                            .field(
-                                "Elapsed / End time",
-                                format!(
-                                    "{} / {}",
-                                    utils::format_minutes_time(server.m_scoring_info.m_current_et),
-                                    utils::format_minutes_time(server.m_scoring_info.m_end_et)
-                                ),
-                                false,
-                            )
-                            .to_owned(),
-                    );
-                }
+                        embeds.push(
+                            CreateEmbed::default()
+                                .colour(server_colour)
+                                .title(server_icon)
+                                .field("Track", server.m_scoring_info.m_track_name.clone(), false)
+                                .field("Drivers", format_drivers(&players), false)
+                                .field(
+                                    "Track temperature",
+                                    utils::format_temp(server.m_scoring_info.m_track_temp),
+                                    true,
+                                )
+                                .field(
+                                    "Ambient",
+                                    utils::format_temp(server.m_scoring_info.m_ambient_temp),
+                                    true,
+                                )
+                                .field(
+                                    "Elapsed / End time",
+                                    format!(
+                                        "{} / {}",
+                                        utils::format_minutes_time(
+                                            server.m_scoring_info.m_current_et
+                                        ),
+                                        utils::format_minutes_time(server.m_scoring_info.m_end_et)
+                                    ),
+                                    false,
+                                )
+                                .to_owned(),
+                        );
+                    }
 
-                m.set_embeds(embeds);
-                m
-            })
-            .await
-            .unwrap();
+                    m.set_embeds(embeds);
+                    m
+                })
+                .await
+            {
+                log::warn!(
+                    "Error updating live racers in channel \"{}\" ({}): {}",
+                    chan.name,
+                    chan.id,
+                    e
+                );
+            }
         }
 
         last_servers_data = servers_data.clone();
