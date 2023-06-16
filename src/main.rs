@@ -134,39 +134,44 @@ async fn update_live_racers(ctx: Context, chan: GuildChannel) -> ! {
                             }
                         };
 
-                        let server_icon =
-                            env::var(format!("{}_ICON", &server.m_scoring_info.m_server_name))
-                                .unwrap_or(server.m_scoring_info.m_server_name.clone());
+                        let server_thumbnail = env::var(format!(
+                            "{}_THUMBNAIL",
+                            &server.m_scoring_info.m_server_name
+                        ))
+                        .ok();
 
-                        embeds.push(
-                            CreateEmbed::default()
-                                .colour(server_colour)
-                                .title(server_icon)
-                                .field("Track", server.m_scoring_info.m_track_name.clone(), false)
-                                .field("Drivers", format_drivers(&players), false)
-                                .field(
-                                    "Track temperature",
-                                    utils::format_temp(server.m_scoring_info.m_track_temp),
-                                    true,
-                                )
-                                .field(
-                                    "Ambient",
-                                    utils::format_temp(server.m_scoring_info.m_ambient_temp),
-                                    true,
-                                )
-                                .field(
-                                    "Elapsed / End time",
-                                    format!(
-                                        "{} / {}",
-                                        utils::format_minutes_time(
-                                            server.m_scoring_info.m_current_et
-                                        ),
-                                        utils::format_minutes_time(server.m_scoring_info.m_end_et)
-                                    ),
-                                    false,
-                                )
-                                .to_owned(),
-                        );
+                        let mut embed = CreateEmbed::default();
+
+                        if let Some(thumbnail) = server_thumbnail {
+                            embed.thumbnail(thumbnail);
+                        }
+
+                        embed
+                            .colour(server_colour)
+                            .title(&server.m_scoring_info.m_server_name)
+                            .field("Track", server.m_scoring_info.m_track_name.clone(), false)
+                            .field("Drivers", format_drivers(&players), false)
+                            .field(
+                                "Track temperature",
+                                utils::format_temp(server.m_scoring_info.m_track_temp),
+                                true,
+                            )
+                            .field(
+                                "Ambient",
+                                utils::format_temp(server.m_scoring_info.m_ambient_temp),
+                                true,
+                            )
+                            .field(
+                                "Elapsed / End time",
+                                format!(
+                                    "{} / {}",
+                                    utils::format_minutes_time(server.m_scoring_info.m_current_et),
+                                    utils::format_minutes_time(server.m_scoring_info.m_end_et)
+                                ),
+                                false,
+                            );
+
+                        embeds.push(embed.to_owned());
                     }
 
                     m.set_embeds(embeds);
