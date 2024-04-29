@@ -6,6 +6,8 @@ use api::Vehicle;
 use serenity::async_trait;
 
 use serenity::builder::CreateEmbed;
+use serenity::model::gateway::Gateway;
+use serenity::model::guild::Member;
 use serenity::model::prelude::ChannelId;
 use serenity::model::prelude::GuildChannel;
 use serenity::prelude::*;
@@ -43,6 +45,26 @@ impl EventHandler for Handler {
                 .unwrap();
 
             tokio::spawn(update_live_racers(ctx.clone(), live_racers.clone()));
+        }
+    }
+
+    async fn guild_member_addition(&self, ctx: Context, new_member: Member) {
+        // I tried using an environment variable for this, but Batch is giving me an anheurism
+        if let Err(e) = new_member.user.direct_message(&ctx, |m| {
+            m.content(r#"
+Welcome!
+**We currently have 2 leagues running:**
+
+**The GSMC - Downforce Cup:** this is a series running over 8 races for the course of a few months using the **Formula Pro** cars. Each race is 40 minutes. The next race is on 21st April, the signup and info for the season is available here: https://discord.com/channels/692059034064519268/1053702897734520832
+
+**The GSME:** this is an endurance series that runs 1 race a month, over the whole year. We are using **GTE** cars. Each race is 1hr long, with special events being longer with driver swaps. The next race is on the 28th April, the signup and info for the season is available here: https://discord.com/channels/692059034064519268/1053702923118448691
+
+Also, scheduling for all the events can be found here: https://discord.com/channels/692059034064519268/1200104236231434411, and in the discord "Events" list!
+
+Let an admin know if you have any questions at all!
+            "#)
+        }).await {
+            log::warn!("Could not send DM to user {}: {}", new_member.user.name, e);
         }
     }
 }
@@ -252,7 +274,7 @@ async fn main() {
     log_panics::init();
 
     let token = env::var("DISCORD_TOKEN").unwrap();
-    let intents = GatewayIntents::empty() | GatewayIntents::GUILD_MESSAGES;
+    let intents = GatewayIntents::empty() | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS;
     let mut client = Client::builder(token, intents)
         .event_handler(Handler)
         .await
